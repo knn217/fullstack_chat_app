@@ -1,0 +1,18 @@
+name: test-distributed-system
+on: [push, workflow_dispatch]
+
+jobs:
+  test-distributed-system:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 1. Setup Database
+        uses: ./.github/actions/setup-db
+
+      - name: 2. Build Web Server
+        uses: ./.github/actions/build-web
+
+      - name: 3. Setup and Test Web Server
+        uses: ./.github/actions/setup-web

@@ -1,0 +1,15 @@
+[package]
+name = "ui"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dioxus = { workspace = true }
+api = { workspace = true }
+
+[features]
+server = ["api/server"]

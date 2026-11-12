@@ -1,0 +1,17 @@
+[package]
+name = "web"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["fullstack"] }
+fullstack = { workspace = true }
+
+[features]
+default = []
+web = ["dioxus/web"]
+server = ["dioxus/server", "fullstack/server"]

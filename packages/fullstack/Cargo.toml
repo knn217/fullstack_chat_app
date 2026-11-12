@@ -1,0 +1,20 @@
+[package]
+name = "fullstack"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["fullstack"] }
+ui = { workspace = true }
+crdb_extract = { workspace = true, optional = true }
+
+[features]
+server = [
+    "ui/server",
+    "dioxus/server",
+    "dep:crdb_extract",
+]

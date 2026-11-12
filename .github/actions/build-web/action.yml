@@ -1,0 +1,48 @@
+name: 'Build Web'
+description: 'Sets up buildx, builds Dioxus web server, and exports tarball'
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    # Step 1: build only the dependency stage. On an unchanged recipe.json this is all
+    # cache hits and uploads nothing. The cache is written only on main, so PR builds
+    # can read it but can't evict it.
+    - name: Warm dependency cache
+      uses: docker/bake-action@v6
+      env:
+        BUILDKIT_PROGRESS: plain
+      with:
+        files: docker-compose.yml
+        targets: dx_web_server
+        push: false
+        set: |
+          dx_web_server.target=deps
+          dx_web_server.cache-from=type=gha,scope=dx_web
+          ${{ github.ref == 'refs/heads/main' && 'dx_web_server.cache-to=type=gha,scope=dx_web,mode=max,compression=zstd,ignore-error=true' || '' }}
+          dx_web_server.output=type=cacheonly
+
+    # Step 2: build the full image straight to a tarball. The deps layers come from the
+    # builder's local cache, and the big dx bundle layer is never exported.
+    - name: Build Dioxus web server
+      uses: docker/bake-action@v6
+      env:
+        BUILDKIT_PROGRESS: plain
+      with:
+        files: docker-compose.yml
+        targets: dx_web_server
+        push: false
+        set: |
+          dx_web_server.cache-from=type=gha,scope=dx_web
+          dx_web_server.output=type=docker,dest=./dx-web-server.tar
+
+    - name: Verify dx web tar file exists
+      shell: bash
+      run: |
+        if [ ! -f "./dx-web-server.tar" ]; then
+          echo "::error::Backend image tarball not found"
+          exit 1
+        fi
+        file "./dx-web-server.tar"
+        ls -lh ./dx-web-server.tar

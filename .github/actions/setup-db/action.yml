@@ -1,0 +1,51 @@
+name: 'Setup DB'
+description: 'Installs k3d, starts CockroachDB, port-forwards, and validates'
+runs:
+  using: "composite"
+  steps:
+    - name: Install k3d
+      shell: bash
+      run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+    - name: Create k3d cluster and deploy CockroachDB
+      shell: bash
+      run: |
+        db_env_output=$(bash scripts/k3d-cockroach.sh | grep "DATABASE_URL=" | head -n 1 || true)
+        if [ -z "$db_env_output" ]; then
+          echo "::error::Failed to find DATABASE_URL in script output."
+          exit 1
+        fi
+        cleaned_url=$(printf '%s\n' "$db_env_output" | sed -E 's/^.*DATABASE_URL=//; s/[[:space:]]+$//' | tr -d "\"'")
+        echo "DATABASE_URL=$cleaned_url" >> $GITHUB_ENV
+
+    - name: Wait for the database load balancer
+      shell: bash
+      run: |
+        kubectl rollout status statefulset/crdb-cockroachdb --timeout=300s
+        for _ in $(seq 60); do
+          openssl s_client -starttls postgres -connect 127.0.0.1:26257 \
+            -CAfile certs/ca.crt </dev/null >/dev/null 2>&1 && exit 0
+          sleep 1
+        done
+        echo "::error::Database not reachable through the load balancer"
+        kubectl get svc,pods -o wide || true
+        exit 1
+
+    - name: Migrate the database
+      shell: bash
+      run: |
+        bash scripts/install-flyway.sh
+        bash scripts/migrate-cockroach.sh
+
+    - name: Validate the database
+      shell: bash
+      run: bash scripts/test-cockroach.sh
+
+    - name: Diagnostics
+      if: failure()
+      shell: bash
+      run: |
+        echo "--- port-forward log ---"; cat /tmp/pf-db.log || true
+        echo "--- pods ---"; kubectl get pods -o wide || true
+        echo "--- restarts / last state ---"; kubectl describe pods -l app.kubernetes.io/name=cockroachdb | grep -E "Restart Count|Last State|Reason|OOM" || true
+        echo "--- cockroach logs ---"; kubectl logs -l app.kubernetes.io/name=cockroachdb --tail=100 --all-containers || true

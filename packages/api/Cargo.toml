@@ -1,0 +1,14 @@
+[package]
+name = "api"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["fullstack"] }
+
+[features]
+server = ["dioxus/server"]
