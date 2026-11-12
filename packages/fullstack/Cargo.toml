@@ -8,7 +8,7 @@ version.workspace = true
 workspace = true
 
 [dependencies]
-dioxus = { workspace = true, features = ["fullstack"] }
+dioxus = { workspace = true, features = ["fullstack", "router"] }
 ui = { workspace = true }
 crdb_extract = { workspace = true, optional = true }
 
