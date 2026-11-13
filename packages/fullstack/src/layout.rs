@@ -57,52 +57,29 @@ fn Login() -> Element {
     let mut token = use_signal(|| None::<String>);
 
     rsx! {
-        h1 { "Log in" }
+        div { class: "auth-page",
+            div { class: "auth-card",
+                h1 { "Log in" }
 
-        form {
-            onsubmit: move |evt| async move {
-                evt.prevent_default();
-                match api::login(username(), password()).await {
-                    Ok(t) => {
-                        token.set(Some(t));
-                        status.set("Logged in".to_string());
-                        // Uncomment to redirect after a successful login:
-                        // nav.push(Route::Home {});
+                form { onsubmit: move |evt| async move {},
+                    input {
+                        placeholder: "Username",
+                        value: "{username}",
+                        oninput: move |e| username.set(e.value()),
                     }
-                    Err(e) => status.set(format!("Error: {e}")),
-                }
-            },
-            input {
-                placeholder: "username",
-                value: "{username}",
-                oninput: move |e| username.set(e.value()),
-            }
-            input {
-                r#type: "password",
-                placeholder: "password",
-                value: "{password}",
-                oninput: move |e| password.set(e.value()),
-            }
-            button { r#type: "submit", "Log in" }
-        }
-
-        button {
-            onclick: move |_| async move {
-                match token() {
-                    Some(t) => {
-                        match api::whoami(t).await {
-                            Ok(name) => status.set(format!("You are {name}")),
-                            Err(e) => status.set(format!("Error: {e}")),
-                        }
+                    input {
+                        r#type: "password",
+                        placeholder: "Password",
+                        value: "{password}",
+                        oninput: move |e| password.set(e.value()),
                     }
-                    None => status.set("Not logged in".to_string()),
+                    button { r#type: "submit", "Log in" }
                 }
-            },
-            "Who am I?"
+
+                p { class: "status", "{status}" }
+
+                Link { to: Route::Home {}, "Back home" }
+            }
         }
-
-        p { "{status}" }
-
-        Link { to: Route::Home {}, "Back home" }
     }
 }
