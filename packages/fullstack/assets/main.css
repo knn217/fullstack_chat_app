@@ -64,11 +64,28 @@ body {
     top: 0;
     right: 0;
     padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .topbar a {
     color: var(--accent);
     text-decoration: none;
+}
+
+.theme-toggle {
+    padding: 4px 8px;
+    font-size: 1rem;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.theme-toggle:hover {
+    border-color: var(--accent);
 }
 
 /* ---------- Auth screen ---------- */
