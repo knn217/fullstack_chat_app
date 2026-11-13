@@ -1,0 +1,72 @@
+/* ---------- Login screen ---------- */
+
+/* Centers the card on the screen */
+.login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 360px;
+    padding: 32px;
+    background: var(--card);
+    border-radius: 12px;
+    box-shadow: 0 4px 24px var(--shadow);
+}
+
+.login-card h1 {
+    margin: 0 0 24px;
+    font-size: 1.5rem;
+}
+
+.login-card form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.login-card input {
+    padding: 10px 12px;
+    font-size: 1rem;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+}
+
+.login-card input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.login-card button {
+    padding: 10px 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.login-card button:hover {
+    filter: brightness(1.1);
+}
+
+.login-card .status {
+    min-height: 1.2em;
+    margin: 12px 0 0;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.login-card a {
+    font-size: 0.9rem;
+    color: var(--accent);
+    text-decoration: none;
+}

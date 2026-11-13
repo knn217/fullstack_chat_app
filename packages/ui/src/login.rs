@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+const LOGIN_CSS: Asset = asset!("/assets/styling/login.css");
+
 #[component]
 pub fn Login() -> Element {
     let mut username = use_signal(String::new);
@@ -8,8 +10,10 @@ pub fn Login() -> Element {
     let mut token = use_signal(|| None::<String>);
 
     rsx! {
-        div { class: "auth-page",
-            div { class: "auth-card",
+        document::Link { rel: "stylesheet", href: LOGIN_CSS }
+
+        div { class: "login-page",
+            div { class: "login-card",
                 h1 { "Log in" }
 
                 form {
