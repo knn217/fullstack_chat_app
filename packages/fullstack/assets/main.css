@@ -11,6 +11,7 @@
     --on-accent: #ffffff;
     --border: #2c313c;
     --shadow: rgba(0, 0, 0, 0.5);
+    --hover: #1f2430;
 }
 
 /* Variants: only the values that differ */
@@ -23,6 +24,7 @@
     --accent: #4f46e5;
     --border: #d1d5db;
     --shadow: rgba(0, 0, 0, 0.12);
+    --hover: #e8eaee;
 }
 
 :root[data-theme="forest"] {
@@ -45,6 +47,7 @@
         --accent: #4f46e5;
         --border: #d1d5db;
         --shadow: rgba(0, 0, 0, 0.12);
+        --hover: #e8eaee;
     }
 }
 
