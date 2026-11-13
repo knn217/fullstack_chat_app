@@ -1,8 +1,6 @@
 use dioxus::prelude::*;
 
-use ui::{Echo, Hero};
-
-use crate::api;
+use ui::{Echo, Hero, Login};
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -54,41 +52,5 @@ fn Home() -> Element {
     rsx! {
         Hero {}
         Echo {}
-    }
-}
-
-#[component]
-fn Login() -> Element {
-    let nav = use_navigator();
-    let mut username = use_signal(String::new);
-    let mut password = use_signal(String::new);
-    let mut status = use_signal(String::new);
-    let mut token = use_signal(|| None::<String>);
-
-    rsx! {
-        div { class: "auth-page",
-            div { class: "auth-card",
-                h1 { "Log in" }
-
-                form { onsubmit: move |evt| async move {},
-                    input {
-                        placeholder: "Username",
-                        value: "{username}",
-                        oninput: move |e| username.set(e.value()),
-                    }
-                    input {
-                        r#type: "password",
-                        placeholder: "Password",
-                        value: "{password}",
-                        oninput: move |e| password.set(e.value()),
-                    }
-                    button { r#type: "submit", "Log in" }
-                }
-
-                p { class: "status", "{status}" }
-
-                Link { to: Route::Home {}, "Back home" }
-            }
-        }
     }
 }
