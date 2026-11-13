@@ -33,6 +33,9 @@ fn Shell() -> Element {
         // shared visible chrome goes here (navbar, etc.)
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
+        nav { class: "topbar",
+            Link { to: Route::Login {}, "Log in" }
+        }
         Outlet::<Route> {}
     }
 }
@@ -41,7 +44,6 @@ fn Shell() -> Element {
 fn Home() -> Element {
     rsx! {
         Hero {}
-        Link { to: Route::Login {}, "Log in" }
         Echo {}
     }
 }
