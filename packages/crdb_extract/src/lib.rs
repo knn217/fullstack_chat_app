@@ -1,11 +1,13 @@
 //! Tiny CockroachDB extractor: one query string in, JSON built by the database out.
+//! [`Extractor::execute`] runs `INSERT`/`UPDATE`/`DELETE` statements.
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), crdb_extract::Error> {
 //! let db = crdb_extract::Extractor::from_env().await?; // reads DATABASE_URL
 //! let users = db.fetch_json("users").await?; // whole table
 //! let adults = db.fetch_json("SELECT id, name FROM users WHERE age >= 18").await?;
-//! # let _ = (users, adults);
+//! let deleted = db.execute("DELETE FROM users WHERE id = 7").await?; // rows affected
+//! # let _ = (users, adults, deleted);
 //! # Ok(())
 //! # }
 //! ```
@@ -59,15 +61,14 @@ impl Extractor {
 
     /// Connects using an explicit url, giving up after 5 seconds.
     ///
-    /// Sessions default to read-only with a 30 second statement timeout. This only guards
-    /// against accidents: a query can undo both with `set_config`, so connect with a
-    /// `SELECT`-only database role. Failures are reported as `Error::Configuration` naming
-    /// the target (`user@host:port/database`, never the password) and the underlying cause.
+    /// Sessions get a 30 second statement timeout (a guard against accidents only: a statement
+    /// can undo it with `set_config`). Nothing else restricts what the connected role may do, so
+    /// connect with the least-privileged role that suffices. Failures are reported as
+    /// `Error::Configuration` naming the target (`user@host:port/database`, never the password)
+    /// and the underlying cause.
     pub async fn connect(url: &str) -> Result<Self> {
-        let options = PgConnectOptions::from_str(url)?.options([
-            ("default_transaction_read_only", "on".to_owned()),
-            ("statement_timeout", STATEMENT_TIMEOUT_MS.to_string()),
-        ]);
+        let options = PgConnectOptions::from_str(url)?
+            .options([("statement_timeout", STATEMENT_TIMEOUT_MS.to_string())]);
         let target = format!(
             "{}@{}:{}/{}",
             options.get_username(),
@@ -107,7 +108,8 @@ impl Extractor {
     /// columns must have unique names. Retried automatically on serialization failures
     /// (SQLSTATE 40001).
     ///
-    /// The query is trusted SQL: never build it from untrusted input.
+    /// The query is trusted SQL: never build it from untrusted input. Do not rely on this method
+    /// being read-only: CockroachDB accepts statements such as `[INSERT ... RETURNING ...]` here.
     pub async fn fetch_json(&self, query: &str) -> Result<Value> {
         let sql = to_json_sql(query)?;
         let sql = sql.as_str();
@@ -122,6 +124,26 @@ impl Extractor {
             .retry(ExponentialBuilder::default().with_max_times(3))
             .when(is_retryable)
             .await
+    }
+
+    /// Runs one `INSERT`, `UPDATE`, `DELETE` (or any other single statement) and returns the
+    /// number of rows affected.
+    ///
+    /// The statement is run as-is with no escaping or filtering; its safety is entirely the
+    /// caller's responsibility. Each call is its own transaction. Retried automatically on
+    /// serialization failures (SQLSTATE 40001), which means the statement may be executed again
+    /// after an aborted attempt.
+    pub async fn execute(&self, statement: &str) -> Result<u64> {
+        // See `fetch_json`: the caller owns the safety of this SQL.
+        let done = (move || async move {
+            sqlx::query::<sqlx::Postgres>(AssertSqlSafe(statement.to_owned()))
+                .execute(&self.pool)
+                .await
+        })
+        .retry(ExponentialBuilder::default().with_max_times(3))
+        .when(is_retryable)
+        .await?;
+        Ok(done.rows_affected())
     }
 }
 
@@ -218,5 +240,40 @@ mod tests {
             .await
             .expect("empty SELECT should succeed");
         assert_eq!(rows, json!([]), "empty result should be an empty array");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a live CockroachDB at DATABASE_URL; creates and drops a scratch table"]
+    async fn live_execute_insert_update_delete() {
+        let db = live().await;
+        let table = format!("crdb_extract_scratch_{}", std::process::id());
+
+        db.execute(&format!("CREATE TABLE {table} (id INT PRIMARY KEY, name STRING)"))
+            .await
+            .expect("creating the scratch table should succeed");
+        let inserted = db
+            .execute(&format!("INSERT INTO {table} VALUES (1, 'a'), (2, 'b')"))
+            .await
+            .expect("insert should succeed");
+        assert_eq!(inserted, 2, "insert should affect two rows");
+
+        let updated = db
+            .execute(&format!("UPDATE {table} SET name = 'c' WHERE id = 1"))
+            .await
+            .expect("update should succeed");
+        assert_eq!(updated, 1, "update should affect one row");
+
+        let rows = db.fetch_json(&table).await.expect("reading the scratch table should succeed");
+        assert_eq!(rows.as_array().map(Vec::len), Some(2), "scratch table should hold two rows");
+
+        let deleted = db
+            .execute(&format!("DELETE FROM {table} WHERE id = 2"))
+            .await
+            .expect("delete should succeed");
+        assert_eq!(deleted, 1, "delete should affect one row");
+
+        db.execute(&format!("DROP TABLE {table}"))
+            .await
+            .expect("dropping the scratch table should succeed");
     }
 }

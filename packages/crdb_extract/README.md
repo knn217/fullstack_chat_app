@@ -2,7 +2,8 @@
 
 A tiny Rust library that takes **one query string** and returns the result from
 CockroachDB as **JSON built by the database itself**. The connection url is read
-from the `DATABASE_URL` environment variable.
+from the `DATABASE_URL` environment variable. It can also run `INSERT`, `UPDATE` and
+`DELETE` statements and report how many rows they affected.
 
 CockroachDB speaks the Postgres wire protocol, so this crate is a thin layer over
 [`sqlx`](https://crates.io/crates/sqlx), with [`backon`](https://crates.io/crates/backon)
@@ -21,6 +22,7 @@ so every column type CockroachDB supports arrives as ordinary JSON.
 | `Extractor::from_env()` | Connect using `DATABASE_URL` |
 | `Extractor::connect(url)` | Connect using an explicit url |
 | `extractor.fetch_json(query)` | Run `query`, return a `serde_json::Value` array of row objects |
+| `extractor.execute(statement)` | Run an `INSERT`, `UPDATE` or `DELETE` (or any single statement); returns the number of rows affected |
 
 `query` is either:
 
@@ -44,16 +46,36 @@ async fn main() -> Result<(), crdb_extract::Error> {
         .fetch_json("SELECT id, name FROM users WHERE age >= 18 ORDER BY id")
         .await?;
 
-    println!("{whole_table}\n{adults}");
+    // Modify data: the statement is run as-is, returns rows affected
+    let inserted = db.execute("INSERT INTO users (id, name) VALUES (7, 'Ada')").await?;
+    let updated = db.execute("UPDATE users SET name = 'Ada L.' WHERE id = 7").await?;
+    let deleted = db.execute("DELETE FROM users WHERE id = 7").await?;
+
+    println!("{whole_table}\n{adults}\n{inserted} {updated} {deleted}");
     Ok(())
 }
 ```
 
+## Safety
+
+`fetch_json` and `execute` run the string you give them **exactly as written**. The crate does no
+escaping, filtering or parameter binding, and under sqlx 0.9 it has to assert this with
+`AssertSqlSafe`. Everything below is your responsibility.
+
+- **Never put untrusted input into a statement.** There are no bind parameters, so interpolating user values is SQL injection. Validate or escape values yourself, or keep statements constant.
+- **Use a least-privileged database role, and never `root` or an admin role.** This is the only real protection. Prefer separate roles (and separate `Extractor`s) for reading and for writing, so the reader holds only `SELECT`.
+- **Do not treat `fetch_json` as read-only.** CockroachDB accepts statements such as `[INSERT ... RETURNING ...]` there, and a statement can lift the crate's 30 second timeout with `set_config(...)`.
+- **Always use a `WHERE` on `UPDATE` and `DELETE`.** `DELETE FROM users` deletes every row. Run the same condition as a `SELECT` first, and check the returned row count. CockroachDB's `sql_safe_updates` setting rejects `UPDATE`/`DELETE` without `WHERE`; consider enabling it for your role.
+- **Each call is its own transaction.** There is no way to make two calls atomic. Do a multi-step change in one statement (for example a CTE) or use `sqlx` directly.
+- **Make writes idempotent.** Serialization failures (SQLSTATE `40001`) are retried automatically, so a statement can run again after an aborted attempt. An "ambiguous result" error (`40003`) is not retried; check the data before repeating the write. `INSERT ... ON CONFLICT DO NOTHING` and `UPSERT` are safe to repeat.
+- **Batch large changes.** Every statement is cancelled and rolled back after 30 seconds. Split big updates and deletes into chunks (for example `DELETE ... WHERE ... LIMIT 1000` in a loop).
+- **Use `sslmode=verify-full`.** Writes over an unverified or plaintext connection can be read or tampered with.
+- **Take a backup or try it on a copy first** for anything destructive, including `DROP` and `TRUNCATE`.
+- **Be careful with logs and errors.** Server errors can echo statement text and data, and connection errors name the host and user. Log them, but do not return them to external clients.
+
 ## Notes
 
 - **Requirements:** Rust 1.94 or newer (sqlx 0.9).
-- **Trusted SQL only.** The query string is run as-is. Never build it from untrusted input. Under sqlx 0.9 the crate has to assert this with `AssertSqlSafe`; that assertion is only fully checked for bare table names. A single token that is not a plain table name (for example `generate_series(1,2)`) is rejected.
-- **Use a `SELECT`-only database role.** This is the only real protection. Every connection defaults to `default_transaction_read_only = on` and a 30 second `statement_timeout`, but that only guards against accidents: a query can call `set_config(...)` to switch both off for the rest of that pooled connection (CockroachDB supports session-scoped `set_config`). Do not share one `Extractor` between trusted and untrusted queries.
 - **Unique column names.** Each row becomes a JSON object, so alias expressions with `AS`.
 - **Whole result in memory.** The database returns one JSON document, so very large tables will use a lot of memory on both sides. Limit with `LIMIT`/`WHERE` or page through the table.
 - **Row order.** An `ORDER BY` inside your query is expected to carry through the wrapper; verify on your cluster version if strict order matters.
@@ -65,5 +87,5 @@ async fn main() -> Result<(), crdb_extract::Error> {
 
 ```sh
 cargo test                              # unit tests only (offline); live tests show as ignored
-DATABASE_URL=... cargo test -- --ignored   # runs the live tests against your cluster
+DATABASE_URL=... cargo test -- --ignored   # runs the live tests (one creates and drops a scratch table)
 ```
