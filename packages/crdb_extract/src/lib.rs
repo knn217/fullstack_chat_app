@@ -10,6 +10,9 @@
 //! # }
 //! ```
 
+#![forbid(unsafe_code)]
+
+use std::env::VarError;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
@@ -17,7 +20,7 @@ use std::time::Duration;
 use backon::{ExponentialBuilder, Retryable};
 use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{ConnectOptions, PgPool};
+use sqlx::{AssertSqlSafe, ConnectOptions, PgPool};
 
 pub use sqlx::Error;
 
@@ -28,6 +31,9 @@ pub const DATABASE_URL_ENV: &str = "DATABASE_URL";
 
 /// How long to wait for a connection before giving up.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Server-side limit applied to every statement, in milliseconds.
+const STATEMENT_TIMEOUT_MS: u32 = 30_000;
 
 /// SQLSTATE CockroachDB returns when a statement must be retried.
 const SERIALIZATION_FAILURE: &str = "40001";
@@ -40,17 +46,28 @@ pub struct Extractor {
 impl Extractor {
     /// Connects using the url in `DATABASE_URL`.
     pub async fn from_env() -> Result<Self> {
-        let url = std::env::var(DATABASE_URL_ENV)
-            .map_err(|e| Error::Configuration(format!("{DATABASE_URL_ENV} is not usable: {e}").into()))?;
+        // Never format the VarError itself: for non-unicode values it prints the value (the password).
+        let url = std::env::var(DATABASE_URL_ENV).map_err(|e| {
+            let why = match e {
+                VarError::NotPresent => "not set",
+                VarError::NotUnicode(_) => "not valid unicode",
+            };
+            Error::Configuration(format!("{DATABASE_URL_ENV} is {why}").into())
+        })?;
         Self::connect(&url).await
     }
 
     /// Connects using an explicit url, giving up after 5 seconds.
     ///
-    /// Failures are reported as `Error::Configuration` naming the target
-    /// (`user@host:port/database`, never the password) and the underlying cause.
+    /// Sessions default to read-only with a 30 second statement timeout. This only guards
+    /// against accidents: a query can undo both with `set_config`, so connect with a
+    /// `SELECT`-only database role. Failures are reported as `Error::Configuration` naming
+    /// the target (`user@host:port/database`, never the password) and the underlying cause.
     pub async fn connect(url: &str) -> Result<Self> {
-        let options = PgConnectOptions::from_str(url)?;
+        let options = PgConnectOptions::from_str(url)?.options([
+            ("default_transaction_read_only", "on".to_owned()),
+            ("statement_timeout", STATEMENT_TIMEOUT_MS.to_string()),
+        ]);
         let target = format!(
             "{}@{}:{}/{}",
             options.get_username(),
@@ -84,15 +101,24 @@ impl Extractor {
 
     /// Runs `query` and returns all rows as one JSON array of objects, built by the database.
     ///
-    /// `query` is either a bare table name (`"users"`, `"app.users"`), which returns the
-    /// whole table, or a `SELECT` statement. An empty result is `[]`. Result columns must
-    /// have unique names. Retried automatically on serialization failures (SQLSTATE 40001).
+    /// `query` is either a bare table name (`"users"`, `"app.users"`; letters, digits and
+    /// underscores only), which returns the whole table, or a `SELECT` statement. A single
+    /// token that is not a plain table name is rejected. An empty result is `[]`. Result
+    /// columns must have unique names. Retried automatically on serialization failures
+    /// (SQLSTATE 40001).
     ///
     /// The query is trusted SQL: never build it from untrusted input.
     pub async fn fetch_json(&self, query: &str) -> Result<Value> {
-        let sql = to_json_sql(query);
+        let sql = to_json_sql(query)?;
         let sql = sql.as_str();
-        (move || async move { sqlx::query_scalar::<sqlx::Postgres, Value>(sql).fetch_one(&self.pool).await })
+        // sqlx 0.9 only accepts `&'static str` unless the caller asserts the SQL is safe. Here that
+        // holds only for bare table names (validated above); any other query is the caller's
+        // responsibility, as documented on this method.
+        (move || async move {
+            sqlx::query_scalar::<sqlx::Postgres, Value>(AssertSqlSafe(sql.to_owned()))
+                .fetch_one(&self.pool)
+                .await
+        })
             .retry(ExponentialBuilder::default().with_max_times(3))
             .when(is_retryable)
             .await
@@ -103,14 +129,26 @@ fn connect_error(target: &str, cause: impl Display) -> Error {
     Error::Configuration(format!("could not connect to {target}: {cause}").into())
 }
 
-fn to_json_sql(input: &str) -> String {
+fn is_table_name(token: &str) -> bool {
+    token.split('.').count() <= 3
+        && token
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+}
+
+fn to_json_sql(input: &str) -> Result<String> {
     let query = input.trim().trim_end_matches(';').trim_end();
     let query = if query.split_whitespace().count() == 1 {
+        if !is_table_name(query) {
+            return Err(Error::Configuration(
+                format!("`{query}` is neither a plain table name nor a SELECT statement").into(),
+            ));
+        }
         format!("SELECT * FROM {query}")
     } else {
         query.to_owned()
     };
-    format!("SELECT coalesce(jsonb_agg(row_to_json(t)), '[]'::JSONB) FROM ({query}) AS t")
+    Ok(format!("SELECT coalesce(jsonb_agg(row_to_json(t)), '[]'::JSONB) FROM ({query}) AS t"))
 }
 
 fn is_retryable(err: &Error) -> bool {
@@ -129,14 +167,27 @@ mod tests {
 
     #[test]
     fn bare_table_name_selects_whole_table() {
-        assert_eq!(to_json_sql("users"), format!("{PREFIX}SELECT * FROM users) AS t"));
-        assert_eq!(to_json_sql(" app.users; "), format!("{PREFIX}SELECT * FROM app.users) AS t"));
+        assert_eq!(
+            to_json_sql("users").expect("plain table name should be accepted"),
+            format!("{PREFIX}SELECT * FROM users) AS t")
+        );
+        assert_eq!(
+            to_json_sql(" app.users; ").expect("schema-qualified name should be accepted"),
+            format!("{PREFIX}SELECT * FROM app.users) AS t")
+        );
+    }
+
+    #[test]
+    fn single_token_that_is_not_a_table_name_is_rejected() {
+        for token in ["generate_series(1,2000000000)", "users)--", "a.b.c.d", ".users", "users."] {
+            assert!(to_json_sql(token).is_err(), "`{token}` should be rejected");
+        }
     }
 
     #[test]
     fn query_is_wrapped_and_semicolon_stripped() {
         assert_eq!(
-            to_json_sql("SELECT id FROM users WHERE id > 5 ;\n"),
+            to_json_sql("SELECT id FROM users WHERE id > 5 ;\n").expect("SELECT should be accepted"),
             format!("{PREFIX}SELECT id FROM users WHERE id > 5) AS t")
         );
     }
