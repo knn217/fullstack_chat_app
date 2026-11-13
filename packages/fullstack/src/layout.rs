@@ -32,17 +32,20 @@ fn Shell() -> Element {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Script { src: THEME_JS }
         nav { class: "topbar",
-            Link { to: Route::Login {}, "Log in" }
-            button {
-                class: "theme-toggle",
-                title: "Toggle light/dark theme",
-                onclick: move |_| {
-                    document::eval("toggleTheme()");
-                },
-                "🌓"
+            Link { class: "topbar-home", to: Route::Home {}, "Home" }
+
+            div { class: "topbar-right",
+                Link { to: Route::Login {}, "Log in" }
+                button {
+                    class: "theme-toggle",
+                    title: "Toggle light/dark theme",
+                    onclick: move |_| {
+                        document::eval("toggleTheme()");
+                    },
+                    "🌓"
+                }
             }
         }
-
         Outlet::<Route> {}
     }
 }
