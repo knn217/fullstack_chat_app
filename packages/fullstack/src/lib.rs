@@ -1,4 +1,3 @@
-mod api;
 mod layout;
 
 pub fn main_fullstack() {

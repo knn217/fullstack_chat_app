@@ -1,5 +1,6 @@
 //! This crate contains all shared fullstack server functions.
 use dioxus::prelude::*;
+pub mod login;
 
 /// Echo the user input on the server.
 #[post("/api/echo")]
