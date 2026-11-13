@@ -1,8 +1,17 @@
 use dioxus::prelude::*;
 
+#[cfg(feature = "server")]
+use {crdb_extract::Extractor, dioxus::server::axum::Extension, std::sync::Arc};
+
 // POST /api/login  (args are sent as a JSON body)
-#[post("/api/login")]
+#[post("/api/login", db: Extension<Arc<Extractor>>)]
 pub async fn login(username: String, password: String) -> Result<String, ServerFnError> {
+    #[cfg(feature = "server")]
+    {
+        let Extension(db) = db;
+        // use db.fetch_json(...) here
+        todo!();
+    }
     // This body only runs on the server.
     // TODO: replace with a real lookup (argon2 hash check against CockroachDB).
     if username == "admin" && password == "secret" {

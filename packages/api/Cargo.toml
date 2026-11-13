@@ -9,6 +9,10 @@ workspace = true
 
 [dependencies]
 dioxus = { workspace = true, features = ["fullstack"] }
+crdb_extract = { workspace = true, optional = true }
 
 [features]
-server = ["dioxus/server"]
+server = [
+    "dioxus/server",
+    "dep:crdb_extract",
+]

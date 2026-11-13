@@ -8,7 +8,8 @@ pub fn main_fullstack() {
     // 2. Server side
     #[cfg(feature = "server")]
     {
-        use dioxus::server::axum::routing::get;
+        use std::sync::Arc;
+        use dioxus::server::axum::{Extension, routing::get};
         use crdb_extract::Extractor;
         dioxus::serve(|| async move {
             // Connect from env var DATABASE_URL
@@ -18,6 +19,7 @@ pub fn main_fullstack() {
             // Create router
             let router = dioxus::server::router(layout::App)
                 .route("/ping", get(|| async { "pong" }))
+                .layer(Extension(Arc::new(db))); // keep this LAST
             ;
             Ok(router)
         });
